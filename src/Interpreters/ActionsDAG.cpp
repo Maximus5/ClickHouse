@@ -3308,16 +3308,23 @@ std::optional<ActionsDAG> ActionsDAG::buildFilterActionsDAG(
 
         const ActionsDAG::Node * result_node = nullptr;
 
-        auto input_node_it = node_name_to_input_node_column.find(node->result_name);
-        if (input_node_it != node_name_to_input_node_column.end())
+        /// Only replace INPUT nodes from the map. Non-INPUT nodes (ALIAS, FUNCTION, etc.)
+        /// represent computed values — replacing them with a raw INPUT would discard the
+        /// computation chain (e.g. a CAST from a type-converting ExpressionStep), leading
+        /// to incorrect key extraction in storage filter pushdown (see #83894).
+        if (node->type == ActionType::INPUT)
         {
-            auto & result_input = result_inputs[input_node_it->second.name];
-            if (!result_input)
-                result_input = &result_dag.addInput(input_node_it->second);
+            auto input_node_it = node_name_to_input_node_column.find(node->result_name);
+            if (input_node_it != node_name_to_input_node_column.end())
+            {
+                auto & result_input = result_inputs[input_node_it->second.name];
+                if (!result_input)
+                    result_input = &result_dag.addInput(input_node_it->second);
 
-            node_to_result_node.emplace(node, result_input);
-            nodes_to_process.pop_back();
-            continue;
+                node_to_result_node.emplace(node, result_input);
+                nodes_to_process.pop_back();
+                continue;
+            }
         }
 
         if (!node_to_process.visited_children)
